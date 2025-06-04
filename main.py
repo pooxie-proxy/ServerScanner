@@ -1,9 +1,13 @@
+import threading
 from mcstatus import JavaServer
 from datetime import datetime
 import time
+import sys
 
 SERVER_LIST_FILE = "servers.txt"
 LOG_FILE = "players_join.log"
+
+stop_flag = False
 
 def load_servers(filename):
     with open(filename, "r") as f:
@@ -18,46 +22,50 @@ def log_join(server, player):
         log.write(log_line + "\n")
 
 def check_server(server_address):
-    print(f"Checking server: {server_address}")
     try:
         server = JavaServer.lookup(server_address)
         status = server.status()
         if status.players.sample:
             for player in status.players.sample:
-                print(f"Found player {player.name} on {server_address}")
                 log_join(server_address, player.name)
                 yield 1
-        else:
-            print(f"No players online on {server_address}")
-    except Exception as e:
-        print(f"Failed to query {server_address}: {e}")
+    except Exception:
+        pass
+
+def input_listener():
+    global stop_flag
+    while True:
+        cmd = input()
+        if cmd.strip().lower() == "exit":
+            print("Exit command received. Stopping scan...")
+            stop_flag = True
+            break
 
 def main():
+    global stop_flag
     servers = load_servers(SERVER_LIST_FILE)
     total_joins_logged = 0
-    print("Type 'exit' and press Enter to quit.")
 
-    while True:
+    # Start input listener thread
+    listener_thread = threading.Thread(target=input_listener, daemon=True)
+    listener_thread.start()
+
+    print("Starting continuous scan. Type 'exit' and press Enter to stop.")
+
+    while not stop_flag:
         joins_this_round = 0
-        print(f"\nScanning {len(servers)} servers...")
 
         for server in servers:
-            # check_server yields 1 for each join logged
+            if stop_flag:
+                break
             for join_event in check_server(server):
                 joins_this_round += join_event
-
-            time.sleep(0.5)  # gentle delay
+            time.sleep(0.5)  # gentle delay between servers
 
         total_joins_logged += joins_this_round
-        print(f"Scanning {len(servers)} servers. {total_joins_logged} join events logged.")
+        print(f"Scanned {len(servers)} servers. Total join events logged: {total_joins_logged}")
 
-        # Wait for user input with a timeout (non-blocking)
-        # If user types 'exit', quit; else continue scanning
-        print("Press Enter to scan again or type 'exit' to quit.")
-        user_input = input().strip().lower()
-        if user_input == "exit":
-            print("Exiting. Goodbye!")
-            break
+    print("Scan stopped.")
 
 if __name__ == "__main__":
     main()
